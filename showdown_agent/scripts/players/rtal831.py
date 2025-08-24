@@ -2,16 +2,66 @@ from poke_env.battle import Battle
 from poke_env.player import Player
 
 team = """
-Pikachu @ Focus Sash  
-Ability: Static  
-Tera Type: Electric  
-EVs: 8 HP / 248 SpA / 252 Spe  
+Koraidon @ Choice Band  
+Ability: Orichalcum Pulse  
+Tera Type: Fighting  
+EVs: 252 SpA / 4 SpD / 252 Spe  
+Jolly Nature  
+- Flare Blitz  
+- Close Combat  
+- U-turn  
+- Dragon Claw  
+
+Rayquaza @ Life Orb  
+Ability: Air Lock  
+Tera Type: Dragon  
+EVs: 252 SpA / 4 SpD / 252 Spe  
+Jolly Nature  
+- Dragon Dance  
+- Dragon Ascent  
+- Earthquake  
+- Extreme Speed  
+
+Necrozma-Dusk-Mane @ Rocky Helmet  
+Ability: Prism Armor  
+Tera Type: Psychic  
+EVs: 252 SpA / 4 SpD / 252 Spe  
+Impish Nature  
+- Stealth Rock  
+- Morning Sun  
+- Sunsteel Strike  
+- Knock Off  
+
+Ho-Oh @ Heavy-Duty Boots  
+Ability: Regenerator  
+Tera Type: Fire  
+EVs: 248 HP / 252 Def / 8 Spe  
+Impish Nature  
+- Brave Bird  
+- Sacred Fire  
+- Recover  
+- Whirlwind  
+
+Eternatus @ Black Sludge  
+Ability: Pressure  
+Tera Type: Poison  
+EVs: 252 SpA / 4 SpD / 252 Spe  
 Timid Nature  
 IVs: 0 Atk  
-- Thunder Wave  
-- Thunder  
-- Reflect
-- Thunderbolt  
+- Dynamax Cannon  
+- Sludge Bomb  
+- Recover  
+- Toxic Spikes  
+
+Arceus-Ground @ Earth Plate  
+Ability: Multitype  
+Tera Type: Ground  
+EVs: 252 SpA / 4 SpD / 252 Spe  
+Jolly Nature  
+- Swords Dance  
+- Earthquake  
+- Stone Edge  
+- Recover  
 """
 
 
