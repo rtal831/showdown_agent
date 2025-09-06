@@ -85,6 +85,25 @@ class CustomAgent(Player):
             self._gen9 = None
             self._base_stats = {}
 
+        # <<< METRICS TRACKING INITIALIZATION >>>
+        self.metrics = {
+            # Metric 1: Correct KO Identification
+            'ko_opportunities': 0,
+            'ko_successes': 0,
+            # Metric 2: Threatened Switch Success Rate
+            'threatened_turns': 0,
+            'threatened_switches_successful': 0,
+            # Metric 3: Safe Setup Opportunity Utilization
+            'safe_setup_opportunities': 0,
+            'safe_setup_attempts': 0,
+            # ADD THESE LINES FOR METRIC 4
+            'threatened_attack_score_sum': 0,
+            'threatened_best_switch_score_sum': 0,
+            'threatened_attack_count': 0,
+            'safe_setup_attack_damage_sum': 0,
+            'safe_setup_attack_count': 0,
+        }
+
     def _base_stat_fallback(self, poke: Pokemon, stat_name: str) -> int:
         species = getattr(poke, "species", None)
         if not species:
@@ -314,7 +333,7 @@ class CustomAgent(Player):
                 if getattr(mv, "base_power", 0) > 0
             ]
 
-            if potential_damages and active.current_hp <= max(potential_damages):
+            if potential_damages and active.current_hp and max(potential_damages) >= active.current_hp:
                 # if in danger, dont setup
                 if base_power == 0:
                     score -= 80
@@ -349,11 +368,12 @@ class CustomAgent(Player):
 
         # how much dmg will we take?
         max_damage = 0
-        for mv in opponent.moves.values():
-            if getattr(mv, "base_power", 0) > 0:
-                dmg = self._calculate_damage(mv, opponent, switch_target, battle)
-                if dmg > max_damage:
-                    max_damage = dmg
+        if opponent.moves:
+            for mv in opponent.moves.values():
+                if getattr(mv, "base_power", 0) > 0:
+                    dmg = self._calculate_damage(mv, opponent, switch_target, battle)
+                    if dmg > max_damage:
+                        max_damage = dmg
 
         damage_fraction = max_damage / (switch_target.max_hp or 1)
         score += (1 - damage_fraction) * 100
@@ -380,12 +400,13 @@ class CustomAgent(Player):
 
         # crisis switch
         is_in_danger = False
-        for mv in opponent.moves.values():
-            if getattr(mv, "base_power", 0) > 0:
-                dmg = self._calculate_damage(mv, opponent, active, battle)
-                if dmg >= (active.current_hp or 1):
-                    is_in_danger = True
-                    break
+        if opponent.moves:
+            for mv in opponent.moves.values():
+                if getattr(mv, "base_power", 0) > 0:
+                    dmg = self._calculate_damage(mv, opponent, active, battle)
+                    if active.current_hp and dmg >= active.current_hp:
+                        is_in_danger = True
+                        break
 
         if is_in_danger and damage_fraction < 0.5:
             score += 100
@@ -395,6 +416,47 @@ class CustomAgent(Player):
     def choose_move(self, battle: Battle):
         if battle.finished:
             return self.choose_random_move(battle)
+
+        active = battle.active_pokemon
+        opponent = battle.opponent_active_pokemon
+
+        # <<< METRICS TRACKING LOGIC (RUNS BEFORE DECISION) >>>
+        if opponent and active:
+            # Metric 1: Correct KO Identification
+            ko_move_available = False
+            for move in battle.available_moves:
+                damage = self._calculate_damage(move, active, opponent, battle)
+                if opponent.current_hp and damage >= opponent.current_hp:
+                    ko_move_available = True
+                    break
+            if ko_move_available:
+                self.metrics['ko_opportunities'] += 1
+
+            # Metric 2: Threatened Switch Success
+            is_threatened = False
+            if opponent.moves:
+                for move in opponent.moves.values():
+                    damage = self._calculate_damage(move, opponent, active, battle)
+                    if active.current_hp and damage >= active.current_hp:
+                        is_threatened = True
+                        break
+            if is_threatened:
+                self.metrics['threatened_turns'] += 1
+
+            # Metric 3: Safe Setup Opportunity
+            is_safe_opportunity = False
+            setup_move_available = any(m.id in ['dragondance', 'stealthrock', 'toxicspikes'] for m in battle.available_moves)
+            if setup_move_available:
+                max_incoming_dmg = 0
+                if opponent.moves:
+                    for move in opponent.moves.values():
+                        damage = self._calculate_damage(move, opponent, active, battle)
+                        if damage > max_incoming_dmg:
+                            max_incoming_dmg = damage
+
+                if active.max_hp and (max_incoming_dmg / active.max_hp) < 0.4:
+                    is_safe_opportunity = True
+                    self.metrics['safe_setup_opportunities'] += 1
 
         possible_actions = []
         if battle.available_moves:
@@ -410,19 +472,111 @@ class CustomAgent(Player):
         best_action = None
         best_score = -math.inf
 
+        action_scores = {}
         for action_info in possible_actions:
             score = 0.0
+            action = action_info['action']
             if action_info['type'] == 'move':
                 score = self._score_move(action_info['action'], battle)
             elif action_info['type'] == 'switch':
                 score = self._score_switch(action_info['action'], battle)
 
-            score += random.uniform(-5, 5)
+            action_scores[action] = score
+            final_score = score + random.uniform(-5, 5)
 
-            if score > best_score:
-                best_score = score
+            if final_score > best_score:
+                best_score = final_score
                 best_action = action_info['action']
+
+        # <<< METRICS TRACKING LOGIC (RUNS AFTER DECISION) >>>
+        if opponent and active and best_action:
+            # Metric 1 Update
+            if ko_move_available and isinstance(best_action, Move):
+                damage = self._calculate_damage(best_action, active, opponent, battle)
+                if opponent.current_hp and damage >= opponent.current_hp:
+                    self.metrics['ko_successes'] += 1
+
+            # Metric 2 Update
+            if is_threatened and isinstance(best_action, Pokemon):
+                max_dmg_to_switch_in = 0
+                if opponent.moves:
+                    for move in opponent.moves.values():
+                        damage = self._calculate_damage(move, opponent, best_action, battle)
+                        if damage > max_dmg_to_switch_in:
+                            max_dmg_to_switch_in = damage
+                if best_action.max_hp and (max_dmg_to_switch_in / best_action.max_hp) < 0.5:
+                    self.metrics['threatened_switches_successful'] += 1
+
+            # Metric 3 Update
+            if is_safe_opportunity and isinstance(best_action, Move):
+                if best_action.id in ['dragondance', 'stealthrock', 'toxicspikes']:
+                    self.metrics['safe_setup_attempts'] += 1
+
+            if is_threatened and isinstance(best_action, Move):
+                self.metrics['threatened_attack_count'] += 1
+                self.metrics['threatened_attack_score_sum'] += action_scores.get(best_action, 0)
+
+                best_switch_score = -math.inf
+                if battle.available_switches:
+                    for switch_poke in battle.available_switches:
+                        score = self._score_switch(switch_poke, battle)
+                        if score > best_switch_score:
+                            best_switch_score = score
+
+                if best_switch_score > -math.inf:
+                    self.metrics['threatened_best_switch_score_sum'] += best_switch_score
+
+            if is_safe_opportunity and isinstance(best_action, Move) and best_action.id not in ['dragondance', 'stealthrock', 'toxicspikes']:
+                self.metrics['safe_setup_attack_count'] += 1
+                damage = self._calculate_damage(best_action, active, opponent, battle)
+                if opponent.max_hp and opponent.max_hp > 0:
+                    damage_percent = (damage / opponent.max_hp) * 100
+                    self.metrics['safe_setup_attack_damage_sum'] += damage_percent
 
         if best_action:
             return self.create_order(best_action)
         return self.choose_random_move(battle)
+
+    def report_final_metrics(self):
+        """
+        Calculates and prints the final metrics accumulated across all battles.
+        """
+        print("\n" + "="*45)
+        print(f"FINAL BEHAVIOURAL METRICS REPORT FOR: {self.username}")
+        print("-"*45)
+
+        # Metric 1
+        ko_opps = self.metrics['ko_opportunities']
+        ko_succ = self.metrics['ko_successes']
+        ko_rate = (ko_succ / ko_opps * 100) if ko_opps > 0 else float('nan')
+        print(f"1. Correct KO Identification Rate: {ko_rate:.1f}% ({ko_succ}/{ko_opps})")
+
+        # Metric 2
+        threat_turns = self.metrics['threatened_turns']
+        threat_succ = self.metrics['threatened_switches_successful']
+        threat_rate = (threat_succ / threat_turns * 100) if threat_turns > 0 else float('nan')
+        print(f"2. Threatened Switch Success Rate: {threat_rate:.1f}% ({threat_succ}/{threat_turns})")
+
+        # Metric 3
+        safe_opps = self.metrics['safe_setup_opportunities']
+        safe_atts = self.metrics['safe_setup_attempts']
+        safe_rate = (safe_atts / safe_opps * 100) if safe_opps > 0 else float('nan')
+        print(f"3. Safe Setup Opportunity Utilization: {safe_rate:.1f}% ({safe_atts}/{safe_opps})")
+
+        print("\n4. Opportunity Cost Analysis:")
+        threat_count = self.metrics['threatened_attack_count']
+        if threat_count > 0:
+            avg_atk_score = self.metrics['threatened_attack_score_sum'] / threat_count
+            avg_sw_score = self.metrics['threatened_best_switch_score_sum'] / threat_count
+            print(f"  - On {threat_count} threatened turns, chosen attacks scored an avg of {avg_atk_score:.1f} vs. the best switch's avg of {avg_sw_score:.1f}.")
+        else:
+            print("  - No threatened turns where an attack was chosen.")
+
+        safe_count = self.metrics['safe_setup_attack_count']
+        if safe_count > 0:
+            avg_dmg_pct = self.metrics['safe_setup_attack_damage_sum'] / safe_count
+            print(f"  - On {safe_count} safe setup turns, chosen attacks dealt an avg of {avg_dmg_pct:.1f}% of opponent's max HP.")
+        else:
+            print("  - No safe setup opportunities were forgone for an attack.")
+
+        print("="*45 + "\n")

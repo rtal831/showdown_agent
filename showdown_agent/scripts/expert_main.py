@@ -183,6 +183,8 @@ def main():
         agents.extend(generic_bots)
 
         agent_rankings = evalute_againts_bots(agents)
+        if hasattr(player, 'report_final_metrics'):
+            player.report_final_metrics()
 
         player_rank = len(agents) + 1
         player_mark = 0.0
